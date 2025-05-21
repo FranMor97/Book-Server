@@ -35,7 +35,7 @@ app.use(cors());
 
 // ROUTES
 //app.use("/api/bookings", routerBooking);
-app.use('/api/user', authRoutes);
+app.use('/api/auth', authRoutes);
 
 // START SERVER
 app.listen(PORT, () => {

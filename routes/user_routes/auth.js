@@ -7,6 +7,7 @@ const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const userModel = require('../../models/user')
 
+const verifyToken = require('../../utils/validate_token.js')
 
 const registerSchema = Joi.object({
     appName: Joi.string().required(),
@@ -19,11 +20,11 @@ const registerSchema = Joi.object({
     mobilePhone: Joi.string().min(6).max(20).required(), // Simple string validation
     birthDate: Joi.date().required(),
     role: Joi.string().valid('client', 'admin').default('client'),
-    avatar: Joi.string().regex(/^data:image\/\w+;base64,/)
+    avatar: Joi.string().regex(/^data:image\/\w+;base64,/).allow(null, '')
   });
 
   
-const schemaLogin = Joi.object({
+const loginSchema = Joi.object({
   email: Joi.string().min(6).max(255).required().email(),
   password: Joi.string().min(6).max(1024).required(),
   role: Joi.string().valid('client', 'admin').default('client')
@@ -124,6 +125,25 @@ router.post('/register', async (req, res) => {
       data: { token }
     });
   });
+
+router.get('/profile', verifyToken, async (req, res) => {
+    try {
+        const token = req.header('auth-token');
+        const decoded = jwt.verify(token, process.env.TOKEN_SECRET);
+
+        const user = await userModel.findById(decoded.id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const userResponse = user.toObject();
+        delete userResponse.password;
+
+        res.status(200).json(userResponse);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 
 module.exports = router

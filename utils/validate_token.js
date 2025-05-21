@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken')
-const blacklistUtil = require('./utils/blacklistUtil');
+const blacklistUtil = require('./blacklistUtils');
 
 
 // middleware to validate token (rutas protegidas)
