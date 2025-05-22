@@ -1,33 +1,25 @@
-// routes/book_routes/books.js
 const router = require('express').Router();
 const Joi = require('joi');
 const verifyToken = require('../../utils/validate_token.js');
 const BookModel = require('../../models/book');
 
-// Esquema de validación para libros
+// Esquema de validación para libros (ya existente)
 const bookSchema = Joi.object({
-    // Información básica
     title: Joi.string().required(),
     authors: Joi.array().items(Joi.string()).min(1).required(),
     synopsis: Joi.string().allow('', null),
-
-    // Información de la edición
     isbn: Joi.string().allow('', null),
     publisher: Joi.string().allow('', null),
     publicationDate: Joi.date().allow(null),
     edition: Joi.string().allow('', null),
     language: Joi.string().default('Español'),
     pageCount: Joi.number().integer().min(1).allow(null),
-
-    // Categorización
     genres: Joi.array().items(Joi.string()),
     tags: Joi.array().items(Joi.string()),
-
-    // Multimedia
     coverImage: Joi.string().allow('', null),
 });
 
-// GET todos los libros (con paginación)
+// GET todos los libros (ya existe, mejorado)
 router.get('/', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -63,7 +55,151 @@ router.get('/', async (req, res) => {
     }
 });
 
-// GET un libro por ID
+// GET búsqueda de libros (NUEVO)
+router.get('/search', async (req, res) => {
+    try {
+        const { q: query } = req.query;
+        if (!query) {
+            return res.status(400).json({ error: 'Parámetro de búsqueda requerido' });
+        }
+
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Búsqueda en múltiples campos
+        const searchFilter = {
+            $or: [
+                { title: { $regex: query, $options: 'i' } },
+                { authors: { $regex: query, $options: 'i' } },
+                { synopsis: { $regex: query, $options: 'i' } },
+                { genres: { $regex: query, $options: 'i' } },
+                { tags: { $regex: query, $options: 'i' } }
+            ]
+        };
+
+        const books = await BookModel.find(searchFilter)
+            .skip(skip)
+            .limit(limit)
+            .sort({ averageRating: -1 });
+
+        const total = await BookModel.countDocuments(searchFilter);
+
+        res.status(200).json({
+            data: books,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET libros populares (NUEVO)
+router.get('/popular', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Ordenar por número total de ratings (popularidad)
+        const books = await BookModel.find()
+            .sort({ totalRatings: -1, averageRating: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        const total = await BookModel.countDocuments();
+
+        res.status(200).json({
+            data: books,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET libros mejor valorados (NUEVO)
+router.get('/top-rated', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Ordenar por rating promedio, pero solo libros con al menos 5 ratings
+        const books = await BookModel.find({ totalRatings: { $gte: 5 } })
+            .sort({ averageRating: -1, totalRatings: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        const total = await BookModel.countDocuments({ totalRatings: { $gte: 5 } });
+
+        res.status(200).json({
+            data: books,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET géneros disponibles (NUEVO)
+router.get('/genres', async (req, res) => {
+    try {
+        // Usar agregación para obtener géneros únicos
+        const genresAggregation = await BookModel.aggregate([
+            { $unwind: '$genres' },
+            { $group: { _id: '$genres', count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const genres = genresAggregation.map(item => item._id);
+
+        res.status(200).json({
+            genres: genres,
+            genresWithCount: genresAggregation
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET autores disponibles (NUEVO)
+router.get('/authors', async (req, res) => {
+    try {
+        // Usar agregación para obtener autores únicos
+        const authorsAggregation = await BookModel.aggregate([
+            { $unwind: '$authors' },
+            { $group: { _id: '$authors', count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const authors = authorsAggregation.map(item => item._id);
+
+        res.status(200).json({
+            authors: authors,
+            authorsWithCount: authorsAggregation
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET un libro por ID (ya existe)
 router.get('/:id', async (req, res) => {
     try {
         const book = await BookModel.findById(req.params.id);
@@ -75,13 +211,11 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// POST crear un nuevo libro (protegido)
+// POST crear un nuevo libro (ya existe)
 router.post('/', verifyToken, async (req, res) => {
-    // Validar datos del libro
     const { error } = bookSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
-    // Si hay ISBN, verificar que no exista ya
     if (req.body.isbn) {
         const existingBook = await BookModel.findOne({ isbn: req.body.isbn });
         if (existingBook) {
@@ -91,7 +225,6 @@ router.post('/', verifyToken, async (req, res) => {
         }
     }
 
-    // Crear y guardar el nuevo libro
     try {
         const book = new BookModel(req.body);
         const savedBook = await book.save();
@@ -105,14 +238,12 @@ router.post('/', verifyToken, async (req, res) => {
     }
 });
 
-// PATCH actualizar un libro existente (protegido)
+// PATCH actualizar un libro existente (ya existe)
 router.patch('/:id', verifyToken, async (req, res) => {
     try {
-        // Verificar si el libro existe
         const book = await BookModel.findById(req.params.id);
         if (!book) return res.status(404).json({ error: 'Libro no encontrado' });
 
-        // Si se está actualizando el ISBN, verificar que no exista ya
         if (req.body.isbn && req.body.isbn !== book.isbn) {
             const existingBook = await BookModel.findOne({ isbn: req.body.isbn });
             if (existingBook) {
@@ -122,7 +253,6 @@ router.patch('/:id', verifyToken, async (req, res) => {
             }
         }
 
-        // Actualizar el libro
         const updatedBook = await BookModel.findByIdAndUpdate(
             req.params.id,
             { $set: req.body },
@@ -138,11 +268,9 @@ router.patch('/:id', verifyToken, async (req, res) => {
     }
 });
 
-// DELETE eliminar un libro (protegido, solo admin)
+// DELETE eliminar un libro (ya existe)
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
-        // TODO: Verificar si el usuario es admin
-
         const book = await BookModel.findByIdAndDelete(req.params.id);
         if (!book) return res.status(404).json({ error: 'Libro no encontrado' });
 
