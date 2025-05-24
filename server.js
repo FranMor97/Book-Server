@@ -3,12 +3,16 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
-
+const morgan = require('morgan');
+const serializeResponseMiddleware = require('./utils/serialize_middleware');
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(morgan('dev'));
+app.use(serializeResponseMiddleware);
+
 
 // Rutas
 const authRoutes = require('./routes/user_routes/auth');

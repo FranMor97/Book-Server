@@ -3,7 +3,12 @@ const Joi = require('joi');
 const verifyToken = require('../../utils/validate_token.js');
 const BookUserModel = require('../../models/book_user.js');
 
-// Esquema de validación para BookUser
+// Función para serializar los datos de MongoDB
+const serializeData = (data) => {
+    return JSON.parse(JSON.stringify(data));
+};
+
+// Esquema de validación para BookUser con propiedades explícitas
 const bookUserSchema = Joi.object({
     userId: Joi.string().required(),
     bookId: Joi.string().required(),
@@ -18,7 +23,8 @@ const bookUserSchema = Joi.object({
     }).allow(null),
     isPrivate: Joi.boolean().default(false),
     shareProgress: Joi.boolean().default(true)
-});
+    // Nota: reviews y notes se gestionan a través de endpoints separados
+}).unknown(false); // Rechazar explícitamente propiedades desconocidas
 
 // GET libros de un usuario
 router.get('/', verifyToken, async (req, res) => {
@@ -39,8 +45,11 @@ router.get('/', verifyToken, async (req, res) => {
 
         const total = await BookUserModel.countDocuments(filter);
 
+        // Serializar los datos antes de enviarlos
+        const serializedBookUsers = serializeData(bookUsers);
+
         res.status(200).json({
-            data: bookUsers,
+            data: serializedBookUsers,
             meta: {
                 total,
                 page,
@@ -49,6 +58,7 @@ router.get('/', verifyToken, async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('Error al obtener libros del usuario:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -63,16 +73,26 @@ router.get('/user/:userId/book/:bookId', verifyToken, async (req, res) => {
 
         if (!bookUser) return res.status(404).json({ error: 'Relación no encontrada' });
 
-        res.status(200).json(bookUser);
+        // Serializar los datos antes de enviarlos
+        const serializedBookUser = serializeData(bookUser);
+
+        res.status(200).json(serializedBookUser);
     } catch (error) {
+        console.error('Error al obtener libro del usuario:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 // POST agregar libro a usuario
 router.post('/', verifyToken, async (req, res) => {
+    console.log('Petición recibida para agregar libro a usuario:', req.body);
+
+    // Validar con Joi
     const { error } = bookUserSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+    if (error) {
+        console.error('Error de validación:', error.details[0].message);
+        return res.status(400).json({ error: error.details[0].message });
+    }
 
     try {
         // Verificar si ya existe la relación
@@ -82,26 +102,46 @@ router.post('/', verifyToken, async (req, res) => {
         });
 
         if (existing) {
+            console.log('El libro ya está en la lista del usuario');
             return res.status(409).json({ error: 'El libro ya está en la lista del usuario' });
         }
 
-        const bookUser = new BookUserModel(req.body);
+        // Crear el objeto book-user con solo los campos permitidos
+        const bookUserData = {
+            userId: req.body.userId,
+            bookId: req.body.bookId,
+            status: req.body.status || 'to-read',
+            currentPage: req.body.currentPage || 0,
+            startDate: req.body.startDate || null,
+        };
+
+        const bookUser = new BookUserModel(bookUserData);
         const savedBookUser = await bookUser.save();
+        console.log('Libro guardado exitosamente con id:', savedBookUser._id);
 
         const populatedBookUser = await BookUserModel.findById(savedBookUser._id)
             .populate('bookId');
 
-        res.status(201).json({
+        // Serializar los datos antes de enviarlos
+        const serializedBookUser = serializeData(populatedBookUser);
+        console.log('BookUser serializado:', JSON.stringify(serializedBookUser).substring(0, 100) + '...');
+
+        // Respuesta completa
+        const response = {
             message: 'Libro agregado correctamente',
-            data: populatedBookUser
-        });
+            data: serializedBookUser
+        };
+
+        res.status(201).json(response);
     } catch (error) {
+        console.error('Error al guardar libro:', error);
         res.status(400).json({ error: error.message });
     }
 });
 
 // PATCH actualizar progreso
 router.patch('/:id', verifyToken, async (req, res) => {
+    console.log('Petición recibida para actualizar progreso:', req.body);
     try {
         const bookUser = await BookUserModel.findByIdAndUpdate(
             req.params.id,
@@ -111,17 +151,22 @@ router.patch('/:id', verifyToken, async (req, res) => {
 
         if (!bookUser) return res.status(404).json({ error: 'Relación no encontrada' });
 
+        // Serializar los datos antes de enviarlos
+        const serializedBookUser = serializeData(bookUser);
+
         res.status(200).json({
             message: 'Progreso actualizado correctamente',
-            data: bookUser
+            data: serializedBookUser
         });
     } catch (error) {
+        console.error('Error al actualizar progreso:', error);
         res.status(400).json({ error: error.message });
     }
 });
 
 // POST agregar reseña
 router.post('/:id/reviews', verifyToken, async (req, res) => {
+    console.log('Petición recibida para agregar reseña:', req.body);
     try {
         const bookUser = await BookUserModel.findById(req.params.id);
         if (!bookUser) return res.status(404).json({ error: 'Relación no encontrada' });
@@ -132,17 +177,22 @@ router.post('/:id/reviews', verifyToken, async (req, res) => {
         const updatedBookUser = await BookUserModel.findById(req.params.id)
             .populate('bookId');
 
+        // Serializar los datos antes de enviarlos
+        const serializedBookUser = serializeData(updatedBookUser);
+
         res.status(200).json({
             message: 'Reseña agregada correctamente',
-            data: updatedBookUser
+            data: serializedBookUser
         });
     } catch (error) {
+        console.error('Error al agregar reseña:', error);
         res.status(400).json({ error: error.message });
     }
 });
 
 // POST agregar nota
 router.post('/:id/notes', verifyToken, async (req, res) => {
+    console.log('Petición recibida para agregar nota:', req.body);
     try {
         const bookUser = await BookUserModel.findById(req.params.id);
         if (!bookUser) return res.status(404).json({ error: 'Relación no encontrada' });
@@ -153,11 +203,15 @@ router.post('/:id/notes', verifyToken, async (req, res) => {
         const updatedBookUser = await BookUserModel.findById(req.params.id)
             .populate('bookId');
 
+        // Serializar los datos antes de enviarlos
+        const serializedBookUser = serializeData(updatedBookUser);
+
         res.status(200).json({
             message: 'Nota agregada correctamente',
-            data: updatedBookUser
+            data: serializedBookUser
         });
     } catch (error) {
+        console.error('Error al agregar nota:', error);
         res.status(400).json({ error: error.message });
     }
 });
@@ -189,8 +243,12 @@ router.get('/user/:userId/stats', verifyToken, async (req, res) => {
             averageRating: 0
         };
 
-        res.status(200).json(result);
+        // Serializar los datos antes de enviarlos
+        const serializedResult = serializeData(result);
+
+        res.status(200).json(serializedResult);
     } catch (error) {
+        console.error('Error al obtener estadísticas:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -203,6 +261,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
         res.status(200).json({ message: 'Libro eliminado de la lista correctamente' });
     } catch (error) {
+        console.error('Error al eliminar libro:', error);
         res.status(500).json({ error: error.message });
     }
 });

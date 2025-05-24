@@ -3,6 +3,11 @@ const Joi = require('joi');
 const verifyToken = require('../../utils/validate_token.js');
 const BookModel = require('../../models/book');
 
+// Función para serializar los datos de MongoDB
+const serializeData = (data) => {
+    return JSON.parse(JSON.stringify(data));
+};
+
 // Esquema de validación para libros (ya existente)
 const bookSchema = Joi.object({
     title: Joi.string().required(),
@@ -41,8 +46,11 @@ router.get('/', async (req, res) => {
         // Contar total para meta información de paginación
         const total = await BookModel.countDocuments(filter);
 
+        // Serializar los datos antes de enviarlos
+        const serializedBooks = serializeData(books);
+
         res.status(200).json({
-            data: books,
+            data: serializedBooks,
             meta: {
                 total,
                 page,
@@ -85,8 +93,11 @@ router.get('/search', async (req, res) => {
 
         const total = await BookModel.countDocuments(searchFilter);
 
+        // Serializar los datos antes de enviarlos
+        const serializedBooks = serializeData(books);
+
         res.status(200).json({
-            data: books,
+            data: serializedBooks,
             meta: {
                 total,
                 page,
@@ -114,8 +125,11 @@ router.get('/popular', async (req, res) => {
 
         const total = await BookModel.countDocuments();
 
+        // Serializar los datos antes de enviarlos
+        const serializedBooks = serializeData(books);
+
         res.status(200).json({
-            data: books,
+            data: serializedBooks,
             meta: {
                 total,
                 page,
@@ -143,8 +157,11 @@ router.get('/top-rated', async (req, res) => {
 
         const total = await BookModel.countDocuments({ totalRatings: { $gte: 5 } });
 
+        // Serializar los datos antes de enviarlos
+        const serializedBooks = serializeData(books);
+
         res.status(200).json({
-            data: books,
+            data: serializedBooks,
             meta: {
                 total,
                 page,
@@ -167,11 +184,13 @@ router.get('/genres', async (req, res) => {
             { $sort: { _id: 1 } }
         ]);
 
-        const genres = genresAggregation.map(item => item._id);
+        // Serializar los datos antes de enviarlos
+        const serializedGenres = serializeData(genresAggregation);
+        const genres = serializedGenres.map(item => item._id);
 
         res.status(200).json({
             genres: genres,
-            genresWithCount: genresAggregation
+            genresWithCount: serializedGenres
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -188,11 +207,13 @@ router.get('/authors', async (req, res) => {
             { $sort: { _id: 1 } }
         ]);
 
-        const authors = authorsAggregation.map(item => item._id);
+        // Serializar los datos antes de enviarlos
+        const serializedAuthors = serializeData(authorsAggregation);
+        const authors = serializedAuthors.map(item => item._id);
 
         res.status(200).json({
             authors: authors,
-            authorsWithCount: authorsAggregation
+            authorsWithCount: serializedAuthors
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -205,7 +226,10 @@ router.get('/:id', async (req, res) => {
         const book = await BookModel.findById(req.params.id);
         if (!book) return res.status(404).json({ error: 'Libro no encontrado' });
 
-        res.status(200).json(book);
+        // Serializar los datos antes de enviarlos
+        const serializedBook = serializeData(book);
+
+        res.status(200).json(serializedBook);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -229,9 +253,12 @@ router.post('/', verifyToken, async (req, res) => {
         const book = new BookModel(req.body);
         const savedBook = await book.save();
 
+        // Serializar los datos antes de enviarlos
+        const serializedBook = serializeData(savedBook);
+
         res.status(201).json({
             message: 'Libro creado correctamente',
-            data: savedBook
+            data: serializedBook
         });
     } catch (error) {
         res.status(400).json({ error: error.message });
@@ -259,9 +286,12 @@ router.patch('/:id', verifyToken, async (req, res) => {
             { new: true, runValidators: true }
         );
 
+        // Serializar los datos antes de enviarlos
+        const serializedBook = serializeData(updatedBook);
+
         res.status(200).json({
             message: 'Libro actualizado correctamente',
-            data: updatedBook
+            data: serializedBook
         });
     } catch (error) {
         res.status(400).json({ error: error.message });
