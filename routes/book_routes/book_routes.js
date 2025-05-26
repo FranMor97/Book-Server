@@ -298,6 +298,48 @@ router.patch('/:id', verifyToken, async (req, res) => {
     }
 });
 
+router.get('/books/:bookId/reviews', async (req, res) => {
+    try {
+        const bookId = req.params.bookId;
+
+        // Buscar todas las relaciones libro-usuario donde el libro coincida
+        // y la reseña sea pública
+        const bookUsers = await BookUserModel.find({
+            bookId: bookId,
+            'reviews.isPublic': true
+        }).populate('userId', 'firstName lastName1 avatar');
+
+        // Extraer y formatear las reseñas
+        const reviews = [];
+        bookUsers.forEach(bookUser => {
+            bookUser.reviews.forEach(review => {
+                if (review.isPublic) {
+                    reviews.push({
+                        id: review.reviewId,
+                        text: review.text,
+                        rating: review.rating,
+                        date: review.date,
+                        title: review.title,
+                        user: bookUser.userId
+                    });
+                }
+            });
+        });
+
+        // Ordenar por fecha (más recientes primero)
+        reviews.sort((a, b) => b.date - a.date);
+
+        res.status(200).json({
+            data: reviews,
+            meta: {
+                total: reviews.length
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // DELETE eliminar un libro (ya existe)
 router.delete('/:id', verifyToken, async (req, res) => {
     try {

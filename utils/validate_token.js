@@ -15,7 +15,7 @@ const verifyToken = async (req, res, next) => {
     if (!token) return res.status(401).json({ error: 'Acceso denegado' })
 
     try {
-        // Verificamos el token usando la dependencia de jwt y el método .verify
+        // Verificamos el token usando la dependencia de jwt y el método
         // NOTA: Cambiado de TOKEN_SECRETO a TOKEN_SECRET para consistencia
         const verified = jwt.verify(token, process.env.TOKEN_SECRET)
         req.user = verified; // Agregamos el usuario verificado al request
