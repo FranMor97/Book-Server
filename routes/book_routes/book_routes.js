@@ -2,6 +2,7 @@ const router = require('express').Router();
 const Joi = require('joi');
 const verifyToken = require('../../utils/validate_token.js');
 const BookModel = require('../../models/book');
+const mongoose = require('mongoose');
 
 // Función para serializar los datos de MongoDB
 const serializeData = (data) => {
@@ -23,6 +24,187 @@ const bookSchema = Joi.object({
     tags: Joi.array().items(Joi.string()),
     coverImage: Joi.string().allow('', null),
 });
+
+const BookUserModel = require('../../models/book_user');
+const UserModel = require('../../models/user');
+
+// GET comentarios de un libro
+router.get('/:bookId/comments', async (req, res) => {
+    try {
+        const bookId = req.params.bookId;
+
+        // Asegurarse de que bookId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(bookId)) {
+            return res.status(400).json({ error: 'ID de libro inválido' });
+        }
+
+        // Buscar todas las relaciones libro-usuario donde el libro coincida
+        // y la reseña sea pública
+        const bookUsers = await BookUserModel.find({
+            bookId: new mongoose.Types.ObjectId(bookId),
+            'reviews.isPublic': true
+        }).populate('userId', 'firstName lastName1 avatar');
+
+        // Extraer y formatear las reseñas
+        const reviews = [];
+        bookUsers.forEach(bookUser => {
+            if (bookUser.reviews && bookUser.reviews.length > 0) {
+                bookUser.reviews.forEach(review => {
+                    if (review.isPublic) {
+                        // Verificar que el userId exista y tenga las propiedades necesarias
+                        if (bookUser.userId) {
+                            reviews.push({
+                                id: review.reviewId || review._id,
+                                text: review.text,
+                                rating: review.rating || 0,
+                                date: review.date,
+                                title: review.title,
+                                user: {
+                                    id: bookUser.userId._id,
+                                    firstName: bookUser.userId.firstName || '',
+                                    lastName1: bookUser.userId.lastName1 || '',
+                                    avatar: bookUser.userId.avatar || null
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        });
+
+        // Ordenar por fecha (más recientes primero)
+        reviews.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        // Serializar los datos antes de enviarlos
+        const serializedReviews = serializeData(reviews);
+
+        res.status(200).json({
+            data: serializedReviews,
+            meta: {
+                total: serializedReviews.length
+            }
+        });
+    } catch (error) {
+        console.error('Error al obtener comentarios:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+// routes/book_routes/book_routes.js - Añadir este endpoint
+router.post('/:bookId/comments', verifyToken, async (req, res) => {
+    try {
+        const bookId = req.params.bookId;
+        const userId = req.user.id; // Obtenido del token en verifyToken
+
+        if (!mongoose.Types.ObjectId.isValid(bookId)) {
+            return res.status(400).json({ error: 'ID de libro inválido' });
+        }
+
+        // Verificar que el usuario tenga una relación con el libro
+        let bookUser = await BookUserModel.findOne({
+            userId: new mongoose.Types.ObjectId(userId),
+            bookId: new mongoose.Types.ObjectId(bookId)
+        });
+
+        if (!bookUser) {
+            // Si no existe la relación, crear una nueva
+            bookUser = new BookUserModel({
+                userId: new mongoose.Types.ObjectId(userId),
+                bookId: new mongoose.Types.ObjectId(bookId),
+                status: 'completed', // Asumimos que si añade una valoración, ha leído el libro
+                currentPage: 0,
+                personalRating: req.body.rating || 0
+            });
+        }
+
+        // Crear la reseña
+        const newReview = {
+            reviewId: new mongoose.Types.ObjectId(),
+            text: req.body.text,
+            rating: req.body.rating || 0,
+            date: new Date(),
+            title: req.body.title,
+            isPublic: req.body.isPublic !== false // Por defecto es pública
+        };
+
+        // Añadir la reseña al array de reseñas
+        bookUser.reviews.push(newReview);
+
+        // Actualizar estado si no estaba completado
+        if (bookUser.status !== 'completed') {
+            bookUser.status = 'completed';
+        }
+
+        // Guardar los cambios
+        await bookUser.save();
+
+        // Actualizar el rating promedio del libro
+        await updateBookRating(bookId);
+
+        // Obtener usuario para incluir en la respuesta
+        const user = await UserModel.findById(userId, 'firstName lastName1 avatar');
+
+        // Formatear la respuesta
+        const commentResponse = {
+            id: newReview.reviewId,
+            text: newReview.text,
+            rating: newReview.rating,
+            date: newReview.date,
+            title: newReview.title,
+            user: {
+                id: userId,
+                firstName: user.firstName,
+                lastName1: user.lastName1,
+                avatar: user.avatar
+            }
+        };
+
+        res.status(201).json({
+            message: 'Valoración añadida correctamente',
+            data: serializeData(commentResponse)
+        });
+    } catch (error) {
+        console.error('Error al añadir valoración:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Función para actualizar el rating promedio de un libro
+async function updateBookRating(bookId) {
+    try {
+        // Obtener todas las reseñas públicas de este libro
+        const bookUsers = await BookUserModel.find({
+            bookId: new mongoose.Types.ObjectId(bookId),
+            'reviews.isPublic': true
+        });
+
+        let totalRating = 0;
+        let totalReviews = 0;
+
+        // Calcular el rating promedio
+        bookUsers.forEach(bookUser => {
+            bookUser.reviews.forEach(review => {
+                if (review.isPublic && review.rating > 0) {
+                    totalRating += review.rating;
+                    totalReviews++;
+                }
+            });
+        });
+
+        const averageRating = totalReviews > 0 ? totalRating / totalReviews : 0;
+
+        // Actualizar el libro
+        await BookModel.findByIdAndUpdate(bookId, {
+            $set: {
+                averageRating: averageRating,
+                totalRatings: totalReviews,
+                totalReviews: totalReviews
+            }
+        });
+    } catch (error) {
+        console.error('Error al actualizar rating del libro:', error);
+    }
+}
+
 
 // GET todos los libros (ya existe, mejorado)
 router.get('/', async (req, res) => {
