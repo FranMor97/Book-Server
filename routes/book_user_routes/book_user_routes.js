@@ -165,6 +165,110 @@
         }
     });
 
+    router.get('/user/:userId/pages-by-period', verifyToken, async (req, res) => {
+        try {
+            const userId = req.params.userId;
+            const period = req.query.period || 'week'; // 'week', 'month', 'year'
+
+            // Calcular la fecha de inicio según el período
+            const startDate = new Date();
+            switch (period) {
+                case 'week':
+                    startDate.setDate(startDate.getDate() - 7);
+                    break;
+                case 'month':
+                    startDate.setMonth(startDate.getMonth() - 1);
+                    break;
+                case 'year':
+                    startDate.setFullYear(startDate.getFullYear() - 1);
+                    break;
+                default:
+                    startDate.setDate(startDate.getDate() - 7); // Por defecto una semana
+            }
+
+            // Buscar actualizaciones de progreso de lectura del usuario
+            const bookUsers = await BookUserModel.find({
+                userId: new mongoose.Types.ObjectId(userId),
+                'status': { $in: ['reading', 'completed'] },
+                'lastUpdated': { $gte: startDate }
+            });
+
+            let pagesRead = 0;
+
+            bookUsers.forEach(bookUser => {
+                if (bookUser.status === 'completed' && bookUser.finishDate >= startDate) {
+
+                    pagesRead += bookUser.currentPage;
+                } else if (bookUser.status === 'reading') {
+
+                    pagesRead += bookUser.currentPage;
+                }
+            });
+
+            res.status(200).json({
+                period: period,
+                pagesRead: pagesRead,
+                booksCount: bookUsers.length
+            });
+        } catch (error) {
+            console.error('Error al obtener páginas por período:', error);
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // routes/book_user_routes/book_user_routes.js - Añadir este endpoint
+
+    // GET géneros favoritos del usuario
+    router.get('/user/:userId/favorite-genres', verifyToken, async (req, res) => {
+        try {
+            const userId = req.params.userId;
+            const limit = parseInt(req.query.limit) || 3; // Por defecto, top 3
+
+            // Buscar todos los libros completados por el usuario
+            const bookUsers = await BookUserModel.find({
+                userId: new mongoose.Types.ObjectId(userId),
+                status: 'completed'
+            }).populate('bookId');
+
+            // Contador de géneros
+            const genresCount = {};
+
+            // Contar la frecuencia de cada género
+            bookUsers.forEach(bookUser => {
+                if (bookUser.bookId && bookUser.bookId.genres) {
+                    bookUser.bookId.genres.forEach(genre => {
+                        if (!genresCount[genre]) {
+                            genresCount[genre] = 0;
+                        }
+                        genresCount[genre]++;
+                    });
+                }
+            });
+
+            // Convertir a array para ordenar
+            const genresArray = Object.entries(genresCount).map(([genre, count]) => ({
+                genre,
+                count
+            }));
+
+            // Ordenar por frecuencia (de mayor a menor)
+            genresArray.sort((a, b) => b.count - a.count);
+
+            // Tomar los primeros 'limit' géneros
+            const topGenres = genresArray.slice(0, limit);
+
+            res.status(200).json({
+                topGenres: topGenres
+            });
+        } catch (error) {
+            console.error('Error al obtener géneros favoritos:', error);
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+
+
+
     // POST agregar reseña
     router.post('/:id/reviews', verifyToken, async (req, res) => {
         console.log('Petición recibida para agregar reseña:', req.body);

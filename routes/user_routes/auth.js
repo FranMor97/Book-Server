@@ -160,5 +160,45 @@ router.get('/profile', verifyToken, async (req, res) => {
     }
 });
 
+// Update user profile endpoint
+router.patch('/profile', verifyToken, async (req, res) => {
+    try {
+        // Exclude sensitive fields from updates
+        const { password, role, email, idNumber, ...updateData } = req.body;
+
+        // Find user by ID (from token)
+        const user = await userModel.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Update user fields
+        for (const [key, value] of Object.entries(updateData)) {
+            if (value !== undefined) {
+                user[key] = value;
+            }
+        }
+
+        // Save updated user
+        const updatedUser = await user.save();
+
+        // Don't return the password in the response
+        const userResponse = updatedUser.toObject();
+        delete userResponse.password;
+
+        // Serializar los datos antes de enviarlos
+        const serializedUserResponse = serializeData(userResponse);
+
+        res.status(200).json({
+            message: 'Perfil actualizado correctamente',
+            data: serializedUserResponse
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+
 
 module.exports = router
