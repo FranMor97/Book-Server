@@ -42,4 +42,34 @@ FriendshipSchema.pre('save', function(next) {
     next();
 });
 
+// Método para obtener información completa de la amistad
+FriendshipSchema.methods.getFullInfo = async function() {
+    await this.populate('requesterId', 'firstName lastName1 lastName2 email avatar')
+        .populate('recipientId', 'firstName lastName1 lastName2 email avatar')
+        .execPopulate();
+
+    return this;
+};
+
+// Método estático para encontrar todas las amistades de un usuario
+FriendshipSchema.statics.findUserFriendships = async function(userId, status = 'accepted') {
+    return this.find({
+        $or: [
+            { requesterId: userId, status },
+            { recipientId: userId, status }
+        ]
+    }).populate('requesterId', 'firstName lastName1 lastName2 email avatar')
+        .populate('recipientId', 'firstName lastName1 lastName2 email avatar');
+};
+
+// Método estático para encontrar una amistad específica entre dos usuarios
+FriendshipSchema.statics.findBetweenUsers = async function(userId1, userId2) {
+    return this.findOne({
+        $or: [
+            { requesterId: userId1, recipientId: userId2 },
+            { requesterId: userId2, recipientId: userId1 }
+        ]
+    });
+};
+
 module.exports = mongoose.model('Friendship', FriendshipSchema, 'friendships');

@@ -10,6 +10,22 @@ const serializeData = (data) => {
     return JSON.parse(JSON.stringify(data));
 };
 
+// Función para normalizar datos de usuario para respuestas consistentes
+const normalizeUser = (user) => {
+    const normalizedUser = user.toObject ? user.toObject() : user;
+
+    // Asegurar que campos requeridos tengan valores por defecto
+    return {
+        ...normalizedUser,
+        id: normalizedUser._id || normalizedUser.id,
+        firstName: normalizedUser.firstName || '',
+        lastName1: normalizedUser.lastName1 || '',
+        lastName2: normalizedUser.lastName2 || '',
+        email: normalizedUser.email || '',
+        avatar: normalizedUser.avatar || '',
+    };
+};
+
 // GET obtener amigos del usuario actual
 router.get('/friends', verifyToken, async (req, res) => {
     try {
@@ -35,8 +51,9 @@ router.get('/friends', verifyToken, async (req, res) => {
             _id: { $in: friendIds }
         }, 'firstName lastName1 lastName2 email avatar');
 
-        // Serializar los datos antes de enviarlos
+        // Serializar y normalizar los datos
         const normalizedFriends = friends.map(normalizeUser);
+
         res.status(200).json({
             data: normalizedFriends,
             meta: {
@@ -49,22 +66,6 @@ router.get('/friends', verifyToken, async (req, res) => {
     }
 });
 
-
-const normalizeUser = (user) => {
-    const u = user.toObject ? user.toObject() : user;
-    return {
-        ...u,
-        firstName: u.firstName || '',
-        lastName1: u.lastName1 || '',
-        lastName2: u.lastName2 || '',
-        email: u.email || '',
-        avatar: u.avatar || '',
-        friendshipStatus: u.friendshipStatus || '',
-        friendshipId: u.friendshipId || '',
-        isRequester: u.isRequester ?? false
-    };
-};
-
 // GET obtener solicitudes de amistad pendientes
 router.get('/requests', verifyToken, async (req, res) => {
     try {
@@ -76,14 +77,17 @@ router.get('/requests', verifyToken, async (req, res) => {
             status: 'pending'
         }).populate('requesterId', 'firstName lastName1 lastName2 email avatar');
 
-        // Serializar los datos antes de enviarlos
+        // Serializar y normalizar los datos
+        const normalizedRequests = pendingRequests.map(request => {
+            const serializedRequest = request.toObject();
+            if (serializedRequest.requesterId) {
+                serializedRequest.requester = normalizeUser(serializedRequest.requesterId);
+            }
+            return serializedRequest;
+        });
 
-        const normalizedRequests = pendingRequests.map(req => ({
-            ...req.toObject(),
-            requesterId: normalizeUser(req.requesterId)
-        }));
         res.status(200).json({
-            data: normalizedRequests,
+            data: serializeData(normalizedRequests),
             meta: {
                 total: normalizedRequests.length
             }
@@ -135,9 +139,12 @@ router.post('/request', verifyToken, async (req, res) => {
 
         await newFriendship.save();
 
+        // Serializar los datos
+        const serializedFriendship = serializeData(newFriendship);
+
         res.status(201).json({
             message: 'Solicitud de amistad enviada correctamente',
-            data: serializeData(newFriendship)
+            data: serializedFriendship
         });
     } catch (error) {
         console.error('Error al enviar solicitud de amistad:', error);
@@ -177,9 +184,12 @@ router.patch('/respond/:friendshipId', verifyToken, async (req, res) => {
         friendship.status = status;
         await friendship.save();
 
+        // Serializar los datos
+        const serializedFriendship = serializeData(friendship);
+
         res.status(200).json({
             message: `Solicitud de amistad ${status === 'accepted' ? 'aceptada' : 'rechazada'} correctamente`,
-            data: serializeData(friendship)
+            data: serializedFriendship
         });
     } catch (error) {
         console.error('Error al responder a solicitud de amistad:', error);
@@ -217,6 +227,8 @@ router.delete('/:friendshipId', verifyToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// GET buscar usuarios
 router.get('/search-users', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -247,26 +259,32 @@ router.get('/search-users', verifyToken, async (req, res) => {
             ]
         });
 
+        // Preparar los resultados con estado de amistad
         const usersWithStatus = limitedUsers.map(user => {
+            const normalizedUser = normalizeUser(user);
+
+            // Buscar si existe una relación con este usuario
             const friendship = friendships.find(f =>
                 (f.requesterId.toString() === userId && f.recipientId.toString() === user._id.toString()) ||
                 (f.recipientId.toString() === userId && f.requesterId.toString() === user._id.toString())
             );
 
-            return normalizeUser({
-                ...user.toObject(),
+            // Añadir información de estado de amistad
+            return {
+                ...normalizedUser,
                 friendshipStatus: friendship ? friendship.status : null,
                 friendshipId: friendship ? friendship._id : null,
                 isRequester: friendship ? friendship.requesterId.toString() === userId : false
-            });
+            };
         });
-        // Serializar los datos antes de enviarlos
-        const serializedUsers = serializeData(usersWithStatus);
+
+        // Serializar los datos
+        const serializedResults = serializeData(usersWithStatus);
 
         res.status(200).json({
-            data: serializedUsers,
+            data: serializedResults,
             meta: {
-                total: serializedUsers.length
+                total: serializedResults.length
             }
         });
     } catch (error) {
@@ -274,6 +292,5 @@ router.get('/search-users', verifyToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
 
 module.exports = router;
