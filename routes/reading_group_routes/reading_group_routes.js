@@ -383,6 +383,204 @@ router.post('/:groupId/messages', verifyToken, async (req, res) => {
     }
 });
 
+// GET buscar grupos públicos
+router.get('/public', verifyToken, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        const query = req.query.q || '';
+
+        // Construir consulta de búsqueda
+        const searchQuery = {
+            isPrivate: false
+        };
+
+        // Añadir filtro de búsqueda si se proporciona
+        if (query) {
+            searchQuery.$or = [
+                { name: { $regex: query, $options: 'i' } },
+                { description: { $regex: query, $options: 'i' } }
+            ];
+        }
+
+        // Buscar grupos públicos
+        const groups = await ReadingGroupModel.find(searchQuery)
+            .populate('bookId', 'title authors coverImage')
+            .populate('creatorId', 'firstName lastName1')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        // Contar total para paginación
+        const total = await ReadingGroupModel.countDocuments(searchQuery);
+
+        // Serializar los datos antes de enviarlos
+        const serializedGroups = serializeData(groups);
+
+        res.status(200).json({
+            data: serializedGroups,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error('Error al buscar grupos públicos:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+// PATCH actualizar configuración del grupo
+router.patch('/:groupId', verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { groupId } = req.params;
+        const { name, description, isPrivate, readingGoal } = req.body;
+
+        // Buscar el grupo
+        const group = await ReadingGroupModel.findById(groupId);
+
+        if (!group) {
+            return res.status(404).json({ error: 'Grupo no encontrado' });
+        }
+
+        // Verificar que el usuario sea administrador
+        const member = group.members.find(m => m.userId.toString() === userId);
+
+        if (!member || member.role !== 'admin') {
+            return res.status(403).json({ error: 'No tienes permisos para editar este grupo' });
+        }
+
+        // Actualizar campos permitidos
+        if (name) group.name = name;
+        if (description !== undefined) group.description = description;
+        if (isPrivate !== undefined) group.isPrivate = isPrivate;
+        if (readingGoal) group.readingGoal = readingGoal;
+
+        // Guardar cambios
+        group.updatedAt = new Date();
+        await group.save();
+
+        // Serializar los datos antes de enviarlos
+        const serializedGroup = serializeData(group);
+
+        res.status(200).json({
+            message: 'Grupo actualizado correctamente',
+            data: serializedGroup
+        });
+    } catch (error) {
+        console.error('Error al actualizar grupo:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+// PATCH gestionar miembros (promover/degradar/expulsar)
+router.patch('/:groupId/members/:memberId', verifyToken, async (req, res) => {
+    try {
+        const adminId = req.user.id;
+        const { groupId, memberId } = req.params;
+        const { action } = req.body; // 'promote', 'demote', 'kick'
+
+        if (!['promote', 'demote', 'kick'].includes(action)) {
+            return res.status(400).json({ error: 'Acción no válida' });
+        }
+
+        // Buscar el grupo
+        const group = await ReadingGroupModel.findById(groupId);
+
+        if (!group) {
+            return res.status(404).json({ error: 'Grupo no encontrado' });
+        }
+
+        // Verificar que el usuario que hace la solicitud sea administrador
+        const adminMember = group.members.find(m => m.userId.toString() === adminId);
+        if (!adminMember || adminMember.role !== 'admin') {
+            return res.status(403).json({ error: 'No tienes permisos de administrador' });
+        }
+
+        // Buscar al miembro objetivo
+        const targetMemberIndex = group.members.findIndex(m => m.userId.toString() === memberId);
+        if (targetMemberIndex === -1) {
+            return res.status(404).json({ error: 'Miembro no encontrado' });
+        }
+
+        // No permitir acciones sobre uno mismo
+        if (memberId === adminId) {
+            return res.status(400).json({ error: 'No puedes realizar esta acción sobre ti mismo' });
+        }
+
+        // Ejecutar acción
+        switch (action) {
+            case 'promote':
+                group.members[targetMemberIndex].role = 'admin';
+                break;
+            case 'demote':
+                // Solo permitir degradar si hay al menos otro administrador
+                const adminCount = group.members.filter(m => m.role === 'admin').length;
+                if (adminCount <= 1) {
+                    return res.status(400).json({ error: 'Debe haber al menos un administrador' });
+                }
+                group.members[targetMemberIndex].role = 'member';
+                break;
+            case 'kick':
+                // Expulsar al miembro
+                group.members.splice(targetMemberIndex, 1);
+                break;
+        }
+
+        // Guardar cambios
+        await group.save();
+
+        // Crear mensaje de sistema para notificar el cambio
+        const admin = await UserModel.findById(adminId, 'firstName lastName1');
+        const targetUser = await UserModel.findById(memberId, 'firstName lastName1');
+
+        let messageText = '';
+        if (action === 'promote') {
+            messageText = `${admin.firstName} ${admin.lastName1} ha promovido a ${targetUser.firstName} ${targetUser.lastName1} a administrador`;
+        } else if (action === 'demote') {
+            messageText = `${admin.firstName} ${admin.lastName1} ha quitado los permisos de administrador a ${targetUser.firstName} ${targetUser.lastName1}`;
+        } else if (action === 'kick') {
+            messageText = `${admin.firstName} ${admin.lastName1} ha expulsado a ${targetUser.firstName} ${targetUser.lastName1} del grupo`;
+        }
+
+        const systemMessage = new GroupMessageModel({
+            groupId,
+            userId: adminId,
+            text: messageText,
+            type: 'system'
+        });
+
+        await systemMessage.save();
+
+        // Si se expulsó a un usuario, notificar por socket
+        if (action === 'kick') {
+            try {
+                const io = ioInstance.getIO();
+                io.to(`user:${memberId}`).emit('group:kicked', { groupId });
+            } catch (socketError) {
+                console.error('Error al emitir evento de socket:', socketError);
+            }
+        }
+
+        // Serializar los datos antes de enviarlos
+        const serializedGroup = serializeData(group);
+
+        res.status(200).json({
+            message: 'Acción realizada correctamente',
+            data: serializedGroup
+        });
+    } catch (error) {
+        console.error('Error al gestionar miembros:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // DELETE abandonar grupo
 router.delete('/:groupId/leave', verifyToken, async (req, res) => {
     try {

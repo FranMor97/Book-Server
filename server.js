@@ -7,6 +7,7 @@ const morgan = require('morgan');
 const http = require('http');
 const socketIo = require('socket.io');
 const serializeResponseMiddleware = require('./utils/serialize_middleware');
+const ioInstance = require('./sockets/io_instance');
 const app = express();
 
 // Middleware
@@ -27,6 +28,8 @@ const io = socketIo(server, {
     credentials: true
   }
 });
+
+ioInstance.init(io);
 
 // Rutas
 const authRoutes = require('./routes/user_routes/auth');

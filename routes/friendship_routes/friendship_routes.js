@@ -36,12 +36,11 @@ router.get('/friends', verifyToken, async (req, res) => {
         }, 'firstName lastName1 lastName2 email avatar');
 
         // Serializar los datos antes de enviarlos
-        const serializedFriends = serializeData(friends);
-
+        const normalizedFriends = friends.map(normalizeUser);
         res.status(200).json({
-            data: serializedFriends,
+            data: normalizedFriends,
             meta: {
-                total: serializedFriends.length
+                total: normalizedFriends.length
             }
         });
     } catch (error) {
@@ -49,6 +48,22 @@ router.get('/friends', verifyToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
+const normalizeUser = (user) => {
+    const u = user.toObject ? user.toObject() : user;
+    return {
+        ...u,
+        firstName: u.firstName || '',
+        lastName1: u.lastName1 || '',
+        lastName2: u.lastName2 || '',
+        email: u.email || '',
+        avatar: u.avatar || '',
+        friendshipStatus: u.friendshipStatus || '',
+        friendshipId: u.friendshipId || '',
+        isRequester: u.isRequester ?? false
+    };
+};
 
 // GET obtener solicitudes de amistad pendientes
 router.get('/requests', verifyToken, async (req, res) => {
@@ -62,12 +77,15 @@ router.get('/requests', verifyToken, async (req, res) => {
         }).populate('requesterId', 'firstName lastName1 lastName2 email avatar');
 
         // Serializar los datos antes de enviarlos
-        const serializedRequests = serializeData(pendingRequests);
 
+        const normalizedRequests = pendingRequests.map(req => ({
+            ...req.toObject(),
+            requesterId: normalizeUser(req.requesterId)
+        }));
         res.status(200).json({
-            data: serializedRequests,
+            data: normalizedRequests,
             meta: {
-                total: serializedRequests.length
+                total: normalizedRequests.length
             }
         });
     } catch (error) {
@@ -199,5 +217,63 @@ router.delete('/:friendshipId', verifyToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+router.get('/search-users', verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const query = req.query.q || '';
+
+        if (query.length < 3) {
+            return res.status(400).json({ error: 'La búsqueda debe tener al menos 3 caracteres' });
+        }
+
+        // Buscar usuarios que coincidan con la consulta (excepto uno mismo)
+        const users = await UserModel.find({
+            _id: { $ne: userId },
+            $or: [
+                { firstName: { $regex: query, $options: 'i' } },
+                { lastName1: { $regex: query, $options: 'i' } },
+                { email: { $regex: query, $options: 'i' } }
+            ]
+        }, 'firstName lastName1 lastName2 email avatar');
+
+        // Límite de resultados para evitar devolver demasiados
+        const limitedUsers = users.slice(0, 10);
+
+        // Buscar relaciones de amistad existentes para estos usuarios
+        const friendships = await FriendshipModel.find({
+            $or: [
+                { requesterId: userId, recipientId: { $in: limitedUsers.map(u => u._id) } },
+                { recipientId: userId, requesterId: { $in: limitedUsers.map(u => u._id) } }
+            ]
+        });
+
+        const usersWithStatus = limitedUsers.map(user => {
+            const friendship = friendships.find(f =>
+                (f.requesterId.toString() === userId && f.recipientId.toString() === user._id.toString()) ||
+                (f.recipientId.toString() === userId && f.requesterId.toString() === user._id.toString())
+            );
+
+            return normalizeUser({
+                ...user.toObject(),
+                friendshipStatus: friendship ? friendship.status : null,
+                friendshipId: friendship ? friendship._id : null,
+                isRequester: friendship ? friendship.requesterId.toString() === userId : false
+            });
+        });
+        // Serializar los datos antes de enviarlos
+        const serializedUsers = serializeData(usersWithStatus);
+
+        res.status(200).json({
+            data: serializedUsers,
+            meta: {
+                total: serializedUsers.length
+            }
+        });
+    } catch (error) {
+        console.error('Error al buscar usuarios:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 module.exports = router;

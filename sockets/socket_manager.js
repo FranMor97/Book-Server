@@ -247,28 +247,16 @@ module.exports = (io) => {
                         return;
                     }
 
-                    // Crear comentario usando el modelo que ya tenías
-                    // (Adaptado según tu modelo BookComment existente)
-                    // Este es un ejemplo ficticio basado en tu estructura actual:
-                    const comment = {
+                    // Esta parte dependería de tu implementación real de comentarios
+                    // Si no tienes esta funcionalidad, puedes eliminar este evento completo
+                    const commentData = {
                         bookId,
                         userId,
                         text,
                         rating: rating || 0,
                         title,
-                        isPublic: isPublic !== false, // Por defecto es público
-                        date: new Date()
-                    };
-
-                    // Guardar comentario (usando tu lógica existente)
-                    // Por ejemplo:
-                    // const savedComment = await BookCommentModel.create(comment);
-                    // O bien usando tu ruta existente con una petición HTTP
-
-                    // Este es un objeto simulado para el ejemplo
-                    const savedComment = {
-                        ...comment,
-                        id: 'temp-id-' + Date.now(),
+                        isPublic: isPublic !== false,
+                        date: new Date(),
                         user: {
                             id: userId,
                             firstName: user.firstName,
@@ -277,8 +265,8 @@ module.exports = (io) => {
                         }
                     };
 
-                    // Emitir notificación de nuevo comentario a todos los interesados en el libro
-                    io.emit(`book:${bookId}:new-comment`, serializeData(savedComment));
+                    // Emitir notificación de nuevo comentario
+                    io.emit(`book:${bookId}:new-comment`, serializeData(commentData));
 
                 } catch (error) {
                     console.error('Error al enviar comentario:', error);

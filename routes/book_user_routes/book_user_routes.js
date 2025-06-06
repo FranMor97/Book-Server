@@ -165,12 +165,12 @@
         }
     });
 
+    // En book_user_routes.js
     router.get('/user/:userId/pages-by-period', verifyToken, async (req, res) => {
         try {
             const userId = req.params.userId;
-            const period = req.query.period || 'week'; // 'week', 'month', 'year'
+            const period = req.query.period || 'week';
 
-            // Calcular la fecha de inicio según el período
             const startDate = new Date();
             switch (period) {
                 case 'week':
@@ -182,26 +182,53 @@
                 case 'year':
                     startDate.setFullYear(startDate.getFullYear() - 1);
                     break;
-                default:
-                    startDate.setDate(startDate.getDate() - 7); // Por defecto una semana
             }
 
-            // Buscar actualizaciones de progreso de lectura del usuario
             const bookUsers = await BookUserModel.find({
                 userId: new mongoose.Types.ObjectId(userId),
-                'status': { $in: ['reading', 'completed'] },
-                'lastUpdated': { $gte: startDate }
+                $or: [
+                    // Libros completados en el período
+                    {
+                        status: 'completed',
+                        finishDate: { $gte: startDate }
+                    },
+                    // Libros en progreso con actualizaciones recientes
+                    {
+                        status: 'reading',
+                        lastUpdated: { $gte: startDate }
+                    }
+                ]
             });
 
             let pagesRead = 0;
+            let previousProgress = {};
 
+            // Para libros completados en el período
             bookUsers.forEach(bookUser => {
                 if (bookUser.status === 'completed' && bookUser.finishDate >= startDate) {
-
+                    // Si se completó en el período, contar todas las páginas
                     pagesRead += bookUser.currentPage;
                 } else if (bookUser.status === 'reading') {
+                    // Para libros en progreso, idealmente deberíamos tener un historial
+                    // Por ahora, estimamos basándonos en la fecha de inicio
+                    if (bookUser.startDate && bookUser.startDate >= startDate) {
+                        // Si empezó en el período, contar todas las páginas leídas
+                        pagesRead += bookUser.currentPage;
+                    } else {
+                        // Si empezó antes, estimar progreso proporcional
+                        // Esta es una aproximación
+                        const daysInPeriod = Math.floor((new Date() - startDate) / (1000 * 60 * 60 * 24));
+                        const totalDays = bookUser.startDate
+                            ? Math.floor((new Date() - bookUser.startDate) / (1000 * 60 * 60 * 24))
+                            : daysInPeriod;
 
-                    pagesRead += bookUser.currentPage;
+                        if (totalDays > 0) {
+                            const estimatedPagesInPeriod = Math.floor(
+                                (bookUser.currentPage * daysInPeriod) / totalDays
+                            );
+                            pagesRead += Math.min(estimatedPagesInPeriod, bookUser.currentPage);
+                        }
+                    }
                 }
             });
 
