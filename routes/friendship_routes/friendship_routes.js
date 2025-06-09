@@ -1,4 +1,5 @@
-// routes/friendship_routes/friendship_routes.js
+// GET obtener solicitudes de amistad pendientes
+
 const router = require('express').Router();
 const mongoose = require('mongoose');
 const verifyToken = require('../../utils/validate_token.js');
@@ -26,6 +27,89 @@ const normalizeUser = (user) => {
     };
 };
 
+router.get('/requests', verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Buscar solicitudes pendientes donde el usuario es el receptor
+        const pendingRequests = await FriendshipModel.find({
+            recipientId: userId,
+            status: 'pending'
+        }).populate('requesterId', 'firstName lastName1 lastName2 email avatar registrationDate');
+
+        // Extraer los usuarios que enviaron las solicitudes
+        const requestingUsers = pendingRequests.map(request => {
+            // Obtener el usuario que envió la solicitud
+            const requester = request.requesterId;
+
+            // Normalizar el usuario
+            const normalizedUser = normalizeUser(requester);
+
+            // Agregar solo el friendshipId como campo extra
+            return {
+                ...normalizedUser,
+                friendshipId: request._id.toString() // Este es el único campo extra necesario
+            };
+        });
+
+        // Serializar y enviar respuesta
+        res.status(200).json({
+            data: serializeData(requestingUsers),
+            meta: {
+                total: requestingUsers.length
+            }
+        });
+    } catch (error) {
+        console.error('Error al obtener solicitudes de amistad:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+/*
+router.get('/requests', verifyToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Buscar solicitudes pendientes donde el usuario es el receptor
+        const pendingRequests = await FriendshipModel.find({
+            recipientId: userId,
+            status: 'pending'
+        }).populate('requesterId', 'firstName lastName1 lastName2 email avatar');
+
+        // Serializar y normalizar los datos
+        const normalizedRequests = pendingRequests.map(request => {
+            // Convertir a objeto JavaScript plano
+            const serializedRequest = request.toObject();
+
+            // Convertir IDs de ObjectId a string
+            serializedRequest._id = serializedRequest._id.toString();
+            serializedRequest.requesterId = serializedRequest.requesterId._id
+                ? serializedRequest.requesterId._id.toString()
+                : serializedRequest.requesterId.toString();
+            serializedRequest.recipientId = serializedRequest.recipientId.toString();
+
+            // Normalizar el objeto requester
+            if (serializedRequest.requesterId && typeof serializedRequest.requesterId === 'object') {
+                serializedRequest.requester = normalizeUser(serializedRequest.requesterId);
+                // Asegurarse de que requesterId sea un string
+                serializedRequest.requesterId = serializedRequest.requester.id || serializedRequest.requesterId.toString();
+            }
+
+            return serializedRequest;
+        });
+
+        // Enviar respuesta serializada
+        res.status(200).json({
+            data: serializeData(normalizedRequests),
+            meta: {
+                total: normalizedRequests.length
+            }
+        });
+    } catch (error) {
+        console.error('Error al obtener solicitudes de amistad:', error);
+        res.status(500).json({ error: error.message });
+    }
+});// routes/friendship_routes/friendship_routes.js
+*/
 // GET obtener amigos del usuario actual
 router.get('/friends', verifyToken, async (req, res) => {
     try {
@@ -35,7 +119,7 @@ router.get('/friends', verifyToken, async (req, res) => {
         const friendships = await FriendshipModel.find({
             $or: [
                 { requesterId: userId, status: 'accepted' },
-                { recipientId: userId, status: 'accepted' }
+                { recipientId: userId, status: 'accepted' },
             ]
         });
 
