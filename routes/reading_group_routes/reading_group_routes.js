@@ -8,29 +8,78 @@ const BookModel = require('../../models/book');
 const UserModel = require('../../models/user');
 const ioInstance = require('../../sockets/io_instance');
 
-// Función para serializar los datos de MongoDB
+// Función para serializar los datos de MongoDB (mantenida para compatibilidad con sockets)
 const serializeData = (data) => {
     return JSON.parse(JSON.stringify(data));
 };
+
+// IMPORTANTE: Las rutas más específicas deben ir ANTES que las rutas con parámetros
+
+// GET buscar grupos públicos (DEBE IR ANTES QUE /:groupId)
+router.get('/public', verifyToken, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        const query = req.query.q || '';
+
+        // Construir consulta de búsqueda
+        const searchQuery = {
+            isPrivate: false
+        };
+
+        // Añadir filtro de búsqueda si se proporciona
+        if (query) {
+            searchQuery.$or = [
+                { name: { $regex: query, $options: 'i' } },
+                { description: { $regex: query, $options: 'i' } }
+            ];
+        }
+
+        // Buscar grupos públicos CON DATOS POBLADOS
+        const groups = await ReadingGroupModel.findWithPopulatedData(searchQuery)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        // Contar total para paginación
+        const total = await ReadingGroupModel.countDocuments(searchQuery);
+
+        // Convertir a formato Flutter
+        const flutterGroups = ReadingGroupModel.toFlutterJSONArray(groups);
+
+        res.status(200).json({
+            data: flutterGroups,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error('Error al buscar grupos públicos:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // GET obtener grupos de lectura del usuario
 router.get('/', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
 
-        // Buscar grupos donde el usuario es miembro
-        const groups = await ReadingGroupModel.find({
+        // Buscar grupos donde el usuario es miembro CON DATOS POBLADOS
+        const groups = await ReadingGroupModel.findWithPopulatedData({
             'members.userId': userId
-        }).populate('bookId', 'title authors coverImage')
-            .populate('creatorId', 'firstName lastName1');
+        });
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroups = serializeData(groups);
+        // Convertir a formato Flutter
+        const flutterGroups = ReadingGroupModel.toFlutterJSONArray(groups);
 
         res.status(200).json({
-            data: serializedGroups,
+            data: flutterGroups,
             meta: {
-                total: serializedGroups.length
+                total: flutterGroups.length
             }
         });
     } catch (error) {
@@ -39,17 +88,19 @@ router.get('/', verifyToken, async (req, res) => {
     }
 });
 
-// GET obtener un grupo específico
+// GET obtener un grupo específico (DEBE IR DESPUÉS DE LAS RUTAS ESPECÍFICAS)
 router.get('/:groupId', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { groupId } = req.params;
 
-        // Buscar el grupo
-        const group = await ReadingGroupModel.findById(groupId)
-            .populate('bookId')
-            .populate('members.userId', 'firstName lastName1 avatar')
-            .populate('creatorId', 'firstName lastName1');
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
+
+        // Buscar el grupo CON DATOS POBLADOS
+        const group = await ReadingGroupModel.findByIdWithPopulatedData(groupId);
 
         if (!group) {
             return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -64,10 +115,10 @@ router.get('/:groupId', verifyToken, async (req, res) => {
             return res.status(403).json({ error: 'No tienes acceso a este grupo' });
         }
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroup = serializeData(group);
+        // Convertir a formato Flutter
+        const flutterGroup = group.toFlutterJSON();
 
-        res.status(200).json(serializedGroup);
+        res.status(200).json(flutterGroup);
     } catch (error) {
         console.error('Error al obtener grupo:', error);
         res.status(500).json({ error: error.message });
@@ -113,12 +164,15 @@ router.post('/', verifyToken, async (req, res) => {
 
         await systemMessage.save();
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroup = serializeData(newGroup);
+        // Obtener el grupo recién creado CON DATOS POBLADOS
+        const populatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(newGroup._id);
+
+        // Convertir a formato Flutter
+        const flutterGroup = populatedGroup.toFlutterJSON();
 
         res.status(201).json({
             message: 'Grupo de lectura creado correctamente',
-            data: serializedGroup
+            data: flutterGroup
         });
     } catch (error) {
         console.error('Error al crear grupo de lectura:', error);
@@ -131,6 +185,11 @@ router.post('/:groupId/join', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { groupId } = req.params;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Buscar el grupo
         const group = await ReadingGroupModel.findById(groupId);
@@ -168,12 +227,15 @@ router.post('/:groupId/join', verifyToken, async (req, res) => {
 
         await systemMessage.save();
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroup = serializeData(group);
+        // Obtener el grupo actualizado CON DATOS POBLADOS
+        const updatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(groupId);
+
+        // Convertir a formato Flutter
+        const flutterGroup = updatedGroup.toFlutterJSON();
 
         res.status(200).json({
             message: 'Te has unido al grupo correctamente',
-            data: serializedGroup
+            data: flutterGroup
         });
     } catch (error) {
         console.error('Error al unirse al grupo:', error);
@@ -187,6 +249,11 @@ router.patch('/:groupId/progress', verifyToken, async (req, res) => {
         const userId = req.user.id;
         const { groupId } = req.params;
         const { currentPage } = req.body;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Validar datos
         if (currentPage === undefined || currentPage < 0) {
@@ -252,19 +319,21 @@ router.patch('/:groupId/progress', verifyToken, async (req, res) => {
             // No interrumpimos la respuesta HTTP si hay error en el socket
         }
 
-        // Serializar los datos antes de enviarlos en la respuesta HTTP
-        const serializedGroup = serializeData(group);
+        // Obtener el grupo actualizado CON DATOS POBLADOS
+        const updatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(groupId);
+
+        // Convertir a formato Flutter
+        const flutterGroup = updatedGroup.toFlutterJSON();
 
         res.status(200).json({
             message: 'Progreso actualizado correctamente',
-            data: serializedGroup
+            data: flutterGroup
         });
     } catch (error) {
         console.error('Error al actualizar progreso:', error);
         res.status(500).json({ error: error.message });
     }
 });
-
 
 // GET mensajes del chat de un grupo
 router.get('/:groupId/messages', verifyToken, async (req, res) => {
@@ -274,6 +343,11 @@ router.get('/:groupId/messages', verifyToken, async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Verificar que el grupo exista
         const group = await ReadingGroupModel.findById(groupId);
@@ -325,6 +399,11 @@ router.post('/:groupId/messages', verifyToken, async (req, res) => {
         const userId = req.user.id;
         const { groupId } = req.params;
         const { text } = req.body;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Validar datos
         if (!text || text.trim() === '') {
@@ -383,63 +462,17 @@ router.post('/:groupId/messages', verifyToken, async (req, res) => {
     }
 });
 
-// GET buscar grupos públicos
-router.get('/public', verifyToken, async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
-        const query = req.query.q || '';
-
-        // Construir consulta de búsqueda
-        const searchQuery = {
-            isPrivate: false
-        };
-
-        // Añadir filtro de búsqueda si se proporciona
-        if (query) {
-            searchQuery.$or = [
-                { name: { $regex: query, $options: 'i' } },
-                { description: { $regex: query, $options: 'i' } }
-            ];
-        }
-
-        // Buscar grupos públicos
-        const groups = await ReadingGroupModel.find(searchQuery)
-            .populate('bookId', 'title authors coverImage')
-            .populate('creatorId', 'firstName lastName1')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit);
-
-        // Contar total para paginación
-        const total = await ReadingGroupModel.countDocuments(searchQuery);
-
-        // Serializar los datos antes de enviarlos
-        const serializedGroups = serializeData(groups);
-
-        res.status(200).json({
-            data: serializedGroups,
-            meta: {
-                total,
-                page,
-                limit,
-                pages: Math.ceil(total / limit)
-            }
-        });
-    } catch (error) {
-        console.error('Error al buscar grupos públicos:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-
 // PATCH actualizar configuración del grupo
 router.patch('/:groupId', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { groupId } = req.params;
         const { name, description, isPrivate, readingGoal } = req.body;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Buscar el grupo
         const group = await ReadingGroupModel.findById(groupId);
@@ -465,12 +498,15 @@ router.patch('/:groupId', verifyToken, async (req, res) => {
         group.updatedAt = new Date();
         await group.save();
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroup = serializeData(group);
+        // Obtener el grupo actualizado CON DATOS POBLADOS
+        const updatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(groupId);
+
+        // Convertir a formato Flutter
+        const flutterGroup = updatedGroup.toFlutterJSON();
 
         res.status(200).json({
             message: 'Grupo actualizado correctamente',
-            data: serializedGroup
+            data: flutterGroup
         });
     } catch (error) {
         console.error('Error al actualizar grupo:', error);
@@ -478,13 +514,17 @@ router.patch('/:groupId', verifyToken, async (req, res) => {
     }
 });
 
-
 // PATCH gestionar miembros (promover/degradar/expulsar)
 router.patch('/:groupId/members/:memberId', verifyToken, async (req, res) => {
     try {
         const adminId = req.user.id;
         const { groupId, memberId } = req.params;
         const { action } = req.body; // 'promote', 'demote', 'kick'
+
+        // Validar que groupId y memberId sean ObjectId válidos
+        if (!mongoose.Types.ObjectId.isValid(groupId) || !mongoose.Types.ObjectId.isValid(memberId)) {
+            return res.status(400).json({ error: 'ID inválido' });
+        }
 
         if (!['promote', 'demote', 'kick'].includes(action)) {
             return res.status(400).json({ error: 'Acción no válida' });
@@ -568,12 +608,15 @@ router.patch('/:groupId/members/:memberId', verifyToken, async (req, res) => {
             }
         }
 
-        // Serializar los datos antes de enviarlos
-        const serializedGroup = serializeData(group);
+        // Obtener el grupo actualizado CON DATOS POBLADOS
+        const updatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(groupId);
+
+        // Convertir a formato Flutter
+        const flutterGroup = updatedGroup.toFlutterJSON();
 
         res.status(200).json({
             message: 'Acción realizada correctamente',
-            data: serializedGroup
+            data: flutterGroup
         });
     } catch (error) {
         console.error('Error al gestionar miembros:', error);
@@ -586,6 +629,11 @@ router.delete('/:groupId/leave', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { groupId } = req.params;
+
+        // Validar que groupId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({ error: 'ID de grupo inválido' });
+        }
 
         // Buscar el grupo
         const group = await ReadingGroupModel.findById(groupId);
