@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const UserModel = require('../models/user');
 const ReadingGroupModel = require('../models/reading_group');
 const GroupMessageModel = require('../models/group_message');
-const BookCommentModel = require('../models/book_comment'); // Asumiendo que existe este modelo
+const BookCommentModel = require('../models/book_comment');
 
 // Función para serializar datos
 const serializeData = (data) => {
@@ -66,6 +66,7 @@ module.exports = (io) => {
 
             userGroups.forEach(group => {
                 socket.join(`group:${group._id}`);
+                console.log(`Usuario ${userId} unido automáticamente al grupo ${group._id}`);
             });
 
             // Notificar al usuario que está conectado
@@ -98,6 +99,17 @@ module.exports = (io) => {
                 } catch (error) {
                     console.error('Error al unirse al grupo:', error);
                     socket.emit('error', { message: 'Error al unirse al grupo' });
+                }
+            });
+
+            // Manejar salida de grupo
+            socket.on('leave:group', async (data) => {
+                try {
+                    const { groupId } = data;
+                    socket.leave(`group:${groupId}`);
+                    console.log(`Usuario ${userId} salió de la sala del grupo ${groupId}`);
+                } catch (error) {
+                    console.error('Error al salir del grupo:', error);
                 }
             });
 
@@ -173,106 +185,18 @@ module.exports = (io) => {
                 }
             });
 
-            // Manejar envío de mensajes al grupo
+            // IMPORTANTE: NO manejar 'send:group-message' aquí
+            // Los mensajes se deben enviar solo a través de la API REST
+            // para evitar duplicados. El servidor emitirá el evento después
+            // de guardar el mensaje en la base de datos.
+
+            /*
+            // COMENTADO PARA EVITAR DUPLICADOS
             socket.on('send:group-message', async (data) => {
-                try {
-                    const { groupId, text } = data;
-
-                    // Validar datos
-                    if (!groupId || !text || text.trim() === '') {
-                        socket.emit('error', { message: 'Parámetros inválidos' });
-                        return;
-                    }
-
-                    // Verificar que el grupo exista
-                    const group = await ReadingGroupModel.findById(groupId);
-
-                    if (!group) {
-                        socket.emit('error', { message: 'Grupo no encontrado' });
-                        return;
-                    }
-
-                    // Verificar si el usuario es miembro
-                    const isMember = group.members.some(member =>
-                        member.userId.toString() === userId
-                    );
-
-                    if (!isMember) {
-                        socket.emit('error', { message: 'No eres miembro de este grupo' });
-                        return;
-                    }
-
-                    // Crear y guardar el mensaje
-                    const newMessage = new GroupMessageModel({
-                        groupId,
-                        userId,
-                        text,
-                        type: 'text'
-                    });
-
-                    await newMessage.save();
-
-                    // Obtener mensaje con datos de usuario
-                    const populatedMessage = await GroupMessageModel.findById(newMessage._id)
-                        .populate('userId', 'firstName lastName1 avatar');
-
-                    // Serializar para enviar
-                    const serializedMessage = serializeData(populatedMessage);
-
-                    // Emitir mensaje a todos los miembros del grupo
-                    io.to(`group:${groupId}`).emit('group-message:new', serializedMessage);
-
-                } catch (error) {
-                    console.error('Error al enviar mensaje:', error);
-                    socket.emit('error', { message: 'Error al enviar mensaje' });
-                }
+                // Este evento no se debe manejar aquí
+                // Los mensajes deben enviarse vía API REST
             });
-
-            // Manejar comentarios de libros
-            socket.on('send:book-comment', async (data) => {
-                try {
-                    const { bookId, text, rating, title, isPublic } = data;
-
-                    // Validar datos
-                    if (!bookId || !text || text.trim() === '' || rating === undefined) {
-                        socket.emit('error', { message: 'Parámetros inválidos' });
-                        return;
-                    }
-
-                    // Buscar usuario para obtener sus datos
-                    const user = await UserModel.findById(userId, 'firstName lastName1 avatar');
-
-                    if (!user) {
-                        socket.emit('error', { message: 'Usuario no encontrado' });
-                        return;
-                    }
-
-                    // Esta parte dependería de tu implementación real de comentarios
-                    // Si no tienes esta funcionalidad, puedes eliminar este evento completo
-                    const commentData = {
-                        bookId,
-                        userId,
-                        text,
-                        rating: rating || 0,
-                        title,
-                        isPublic: isPublic !== false,
-                        date: new Date(),
-                        user: {
-                            id: userId,
-                            firstName: user.firstName,
-                            lastName1: user.lastName1,
-                            avatar: user.avatar
-                        }
-                    };
-
-                    // Emitir notificación de nuevo comentario
-                    io.emit(`book:${bookId}:new-comment`, serializeData(commentData));
-
-                } catch (error) {
-                    console.error('Error al enviar comentario:', error);
-                    socket.emit('error', { message: 'Error al enviar comentario' });
-                }
-            });
+            */
 
             // Manejar suscripción a comentarios de un libro
             socket.on('subscribe:book-comments', (data) => {
@@ -300,4 +224,28 @@ module.exports = (io) => {
             console.error('Error en la conexión del socket:', error);
         }
     });
+
+    // Exportar función para emitir mensajes desde la API
+    return {
+        emitGroupMessage: async (groupId, message) => {
+            try {
+                // Emitir mensaje a todos los miembros del grupo
+                io.to(`group:${groupId}`).emit('group-message:new', serializeData(message));
+                console.log(`Mensaje emitido al grupo ${groupId}`);
+            } catch (error) {
+                console.error('Error emitiendo mensaje:', error);
+            }
+        },
+
+        emitToUser: (userId, event, data) => {
+            const socketId = connectedUsers.get(userId);
+            if (socketId) {
+                io.to(socketId).emit(event, data);
+            }
+        },
+
+        emitToGroup: (groupId, event, data) => {
+            io.to(`group:${groupId}`).emit(event, data);
+        }
+    };
 };
