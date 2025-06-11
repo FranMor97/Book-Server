@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken')
 const userModel = require('../../models/user')
 
 const verifyToken = require('../../utils/validate_token.js')
+const mongoose = require("mongoose");
 
 // Función para serializar los datos de MongoDB
 const serializeData = (data) => {
@@ -34,6 +35,8 @@ const loginSchema = Joi.object({
     password: Joi.string().min(6).max(1024).required(),
     role: Joi.string().valid('client', 'admin').default('client')
 })
+
+
 
 router.get('/getAll', async (req, res) => {
     try{
@@ -194,6 +197,35 @@ router.patch('/profile', verifyToken, async (req, res) => {
             data: serializedUserResponse
         });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/user/:userId', verifyToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Validar que userId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ error: 'ID de usuario inválido' });
+        }
+
+        // Buscar el usuario por ID, excluyendo la contraseña
+        const user = await userModel.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Serializar los datos antes de enviarlos
+        const serializedUser = serializeData(user);
+
+        res.status(200).json({
+            error: null,
+            data: serializedUser
+        });
+    } catch (error) {
+        console.error('Error al obtener usuario por ID:', error);
         res.status(500).json({ error: error.message });
     }
 });

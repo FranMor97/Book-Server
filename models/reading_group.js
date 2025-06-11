@@ -1,5 +1,6 @@
 // models/reading_group.js
 const mongoose = require('mongoose');
+const {static} = require("express");
 
 const ReadingGroupSchema = new mongoose.Schema({
     // Información básica del grupo
@@ -118,32 +119,6 @@ ReadingGroupSchema.methods.toFlutterJSON = function() {
         _id: obj._id.toString(),
         bookId: obj.bookId && obj.bookId._id ? obj.bookId._id.toString() : obj.bookId.toString(),
         creatorId: obj.creatorId && obj.creatorId._id ? obj.creatorId._id.toString() : obj.creatorId.toString(),
-
-        // Objetos relacionados completos
-        book: obj.bookId && obj.bookId._id ? {
-            id: obj.bookId._id.toString(),
-            _id: obj.bookId._id.toString(), // Para compatibilidad
-            title: obj.bookId.title,
-            authors: obj.bookId.authors,
-            coverImage: obj.bookId.coverImage,
-            description: obj.bookId.description,
-            pages: obj.bookId.pages,
-            isbn: obj.bookId.isbn,
-            publishedDate: obj.bookId.publishedDate
-            // Añadir otros campos del libro según necesidad
-        } : null,
-
-        creator: obj.creatorId && obj.creatorId._id ? {
-            id: obj.creatorId._id.toString(),
-            _id: obj.creatorId._id.toString(), // Para compatibilidad
-            firstName: obj.creatorId.firstName,
-            lastName1: obj.creatorId.lastName1,
-            lastName2: obj.creatorId.lastName2,
-            email: obj.creatorId.email,
-            avatar: obj.creatorId.avatar
-            // Añadir otros campos del usuario según necesidad
-        } : null,
-
         // Transformar miembros
         members: obj.members.map(member => ({
             userId: member.userId && member.userId._id ? member.userId._id.toString() : member.userId.toString(),
@@ -166,21 +141,21 @@ ReadingGroupSchema.methods.toFlutterJSON = function() {
     return result;
 };
 
-// Método estático para obtener grupos con datos poblados
-ReadingGroupSchema.statics.findWithPopulatedData = function(query = {}) {
+ ReadingGroupSchema.methods.findWithPopulatedData = function(query = {}) {
     return this.find(query)
-        .populate('bookId')       // Devuelve todos los campos del libro
-        .populate('creatorId')    // Devuelve todos los campos del creador
-        .populate('members.userId'); // Devuelve todos los campos de los miembros
+        .populate('bookId', 'title authors synopsis coverImage pageCount isbn publicationDate edition language publisher genres tags averageRating totalRatings') // Datos correctos del libro
+        .populate('creatorId', 'firstName lastName1 lastName2 email avatar') // Datos del creador
+        .populate('members.userId', 'firstName lastName1 lastName2 email avatar'); // Datos de los miembros
 };
 
 // Método estático para obtener un grupo específico con datos poblados
-ReadingGroupSchema.statics.findByIdWithPopulatedData = function(id) {
+ReadingGroupSchema.methods.findByIdWithPopulatedData = function(id) {
     return this.findById(id)
-        .populate('bookId')
-        .populate('creatorId')
-        .populate('members.userId');
+        .populate('bookId', 'title authors synopsis coverImage pageCount isbn publicationDate edition language publisher genres tags averageRating totalRatings')
+        .populate('creatorId', 'firstName lastName1 lastName2 email avatar')
+        .populate('members.userId', 'firstName lastName1 lastName2 email avatar');
 };
+
 
 // Método estático para transformar múltiples documentos
 ReadingGroupSchema.statics.toFlutterJSONArray = function(groups) {
