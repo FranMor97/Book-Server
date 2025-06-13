@@ -201,6 +201,34 @@ router.patch('/profile', verifyToken, async (req, res) => {
     }
 });
 
+
+router.delete('/user/:userId', verifyToken, async (req, res) => {
+    const { userId } = req.params;
+    try {
+        // Validar que userId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ error: 'ID de usuario inválido' });
+        }
+
+        // Buscar el usuario por ID
+        const user = await userModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        // Eliminar el usuario
+        await userModel.findByIdAndDelete(userId);
+
+        res.status(200).json({
+            message: 'Usuario eliminado correctamente',
+            data: { userId }
+        });
+    } catch (error) {
+        console.error('Error al eliminar usuario:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.get('/user/:userId', verifyToken, async (req, res) => {
     try {
         const { userId } = req.params;
