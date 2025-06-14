@@ -39,15 +39,22 @@ const loginSchema = Joi.object({
 
 
 router.get('/getAll', async (req, res) => {
-    try{
-        const data = await userModel.find();
+    try {
+        const users = await userModel.find();
+
+        // Convertir a objetos planos y eliminar passwords
+        const usersWithoutPasswords = users.map(user => {
+            const userObj = user.toObject();
+            delete userObj.password;
+            return userObj;
+        });
 
         // Serializar los datos antes de enviarlos
-        const serializedData = serializeData(data);
+        const serializedData = serializeData(usersWithoutPasswords);
 
         res.status(200).json(serializedData);
     }
-    catch(error){
+    catch(error) {
         res.status(500).json({message: error.message});
     }
 });
@@ -91,14 +98,11 @@ router.post('/register', async (req, res) => {
     });
 
     try {
-        // Save user to database
         const savedUser = await user.save();
 
-        // Don't return the password in the response
         const userResponse = savedUser.toObject();
         delete userResponse.password;
 
-        // Serializar los datos antes de enviarlos
         const serializedUserResponse = serializeData(userResponse);
 
         res.status(201).json({
@@ -111,26 +115,22 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-    // Validate login data
     const { error } = loginSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
-    // Check if user exists
     const user = await userModel.findOne({ email: req.body.email });
     if (!user) return res.status(400).json({ error: 'User not found' });
 
-    // Validate password
     const validPassword = await bcrypt.compare(req.body.password, user.password);
     if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
 
-    // Create JWT token
     const token = jwt.sign(
         {
             email: user.email,
             role: user.role,
             id: user._id
         },
-        process.env.TOKEN_SECRET, // Changed TOKEN_SECRETO to TOKEN_SECRET
+        process.env.TOKEN_SECRET,
         { expiresIn: process.env.JWT_EXPIRES }
     );
 
@@ -162,6 +162,35 @@ router.get('/profile', verifyToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+
+router.get('/profile:userId', verifyToken, async (req, res) => {
+    const {id} = req.params.userId;
+    if(!id) {
+        return res.status(400).json({ error: 'ID de usuario no proporcionado' });
+    }
+    if(!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: 'ID de usuario inválido' });
+    }
+    try {
+        const user = await userModel.findById(id);
+        if (!user) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
+        }
+
+        const userResponse = user.toObject();
+        delete userResponse.password;
+
+        // Serializar los datos antes de enviarlos
+        const serializedUserResponse = serializeData(userResponse);
+
+        res.status(200).json(serializedUserResponse);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 
 // Update user profile endpoint
 router.patch('/profile', verifyToken, async (req, res) => {
@@ -204,30 +233,98 @@ router.patch('/profile', verifyToken, async (req, res) => {
 
 router.delete('/user/:userId', verifyToken, async (req, res) => {
     const { userId } = req.params;
+    const session = await mongoose.startSession();
+
     try {
+        session.startTransaction();
+
         // Validar que userId sea un ObjectId válido
         if (!mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(400).json({ error: 'ID de usuario inválido' });
         }
 
         // Buscar el usuario por ID
-        const user = await userModel.findById(userId);
+        const user = await userModel.findById(userId).session(session);
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
-        // Eliminar el usuario
-        await userModel.findByIdAndDelete(userId);
+        // Eliminar registros relacionados
+        await BookUserModel.deleteMany({ userId }).session(session);
+        await BookCommentModel.deleteMany({ userId }).session(session);
+
+        // Eliminar amistades donde el usuario es solicitante o receptor
+        await FriendshipModel.deleteMany({
+            $or: [{ requesterId: userId }, { recipientId: userId }]
+        }).session(session);
+
+        // Eliminar mensajes enviados por el usuario
+        await GroupMessageModel.deleteMany({ userId }).session(session);
+
+        // Manejar grupos de lectura
+        const userGroups = await ReadingGroupModel.find({
+            'members.userId': userId
+        }).session(session);
+
+        for (const group of userGroups) {
+            // Si el usuario es el creador y único miembro, eliminar el grupo
+            if (group.creatorId.toString() === userId && group.members.length === 1) {
+                await ReadingGroupModel.findByIdAndDelete(group._id).session(session);
+                await GroupMessageModel.deleteMany({ groupId: group._id }).session(session);
+            } else {
+                // Si el usuario es el creador pero hay más miembros, transferir propiedad
+                if (group.creatorId.toString() === userId) {
+                    // Encontrar otro miembro (preferiblemente admin)
+                    const newCreatorIndex = group.members.findIndex(member =>
+                        member.userId.toString() !== userId && member.role === 'admin'
+                    ) || group.members.findIndex(member =>
+                        member.userId.toString() !== userId
+                    );
+
+                    if (newCreatorIndex !== -1) {
+                        group.creatorId = group.members[newCreatorIndex].userId;
+                        group.members[newCreatorIndex].role = 'admin';
+                    }
+                }
+
+                // Eliminar al usuario de los miembros
+                group.members = group.members.filter(member =>
+                    member.userId.toString() !== userId
+                );
+
+                await group.save({ session });
+
+                // Crear mensaje de sistema para notificar salida
+                const systemMessage = new GroupMessageModel({
+                    groupId: group._id,
+                    userId: group.creatorId, // Usar creadorId actual como emisor
+                    text: `Un usuario ha sido eliminado del sistema`,
+                    type: 'system'
+                });
+
+                await systemMessage.save({ session });
+            }
+        }
+
+        // Finalmente, eliminar el usuario
+        await userModel.findByIdAndDelete(userId).session(session);
+
+        await session.commitTransaction();
 
         res.status(200).json({
-            message: 'Usuario eliminado correctamente',
+            message: 'Usuario y todos sus datos relacionados eliminados correctamente',
             data: { userId }
         });
     } catch (error) {
-        console.error('Error al eliminar usuario:', error);
+        await session.abortTransaction();
+        console.error('Error al eliminar usuario y datos relacionados:', error);
         res.status(500).json({ error: error.message });
+    } finally {
+        await session.endSession();
     }
 });
+
+
 
 router.get('/user/:userId', verifyToken, async (req, res) => {
     try {
@@ -245,8 +342,10 @@ router.get('/user/:userId', verifyToken, async (req, res) => {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
+        const userResponse = user.toObject();
+        delete userResponse.password; // No enviar la contraseña en la respuesta
         // Serializar los datos antes de enviarlos
-        const serializedUser = serializeData(user);
+        const serializedUser = serializeData(userResponse);
 
         res.status(200).json({
             error: null,

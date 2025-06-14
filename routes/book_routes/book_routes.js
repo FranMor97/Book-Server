@@ -245,7 +245,6 @@ router.get('/', async (req, res) => {
     }
 });
 
-// GET búsqueda de libros (NUEVO)
 router.get('/search', async (req, res) => {
     try {
         const { q: query } = req.query;
@@ -292,7 +291,7 @@ router.get('/search', async (req, res) => {
     }
 });
 
-// GET libros populares (NUEVO)
+
 router.get('/popular', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -324,7 +323,6 @@ router.get('/popular', async (req, res) => {
     }
 });
 
-// GET libros mejor valorados (NUEVO)
 router.get('/top-rated', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -356,7 +354,6 @@ router.get('/top-rated', async (req, res) => {
     }
 });
 
-// GET géneros disponibles (NUEVO)
 router.get('/genres', async (req, res) => {
     try {
         // Usar agregación para obtener géneros únicos
@@ -379,7 +376,7 @@ router.get('/genres', async (req, res) => {
     }
 });
 
-// GET autores disponibles (NUEVO)
+
 router.get('/authors', async (req, res) => {
     try {
         // Usar agregación para obtener autores únicos
@@ -402,7 +399,6 @@ router.get('/authors', async (req, res) => {
     }
 });
 
-// GET un libro por ID (ya existe)
 router.get('/:id', async (req, res) => {
     try {
         const book = await BookModel.findById(req.params.id);
@@ -417,7 +413,6 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// POST crear un nuevo libro (ya existe)
 router.post('/', verifyToken, async (req, res) => {
     const { error } = bookSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
@@ -522,12 +517,12 @@ router.get('/books/:bookId/reviews', async (req, res) => {
     }
 });
 
-// DELETE eliminar un libro (ya existe)
+
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
         const book = await BookModel.findByIdAndDelete(req.params.id);
         if (!book) return res.status(404).json({ error: 'Libro no encontrado' });
-
+        
         res.status(200).json({
             message: 'Libro eliminado correctamente'
         });
