@@ -114,32 +114,7 @@ router.post('/register', async (req, res) => {
     }
 });
 
-router.post('/login', async (req, res) => {
-    const { error } = loginSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
 
-    const user = await userModel.findOne({ email: req.body.email });
-    if (!user) return res.status(400).json({ error: 'User not found' });
-
-    const validPassword = await bcrypt.compare(req.body.password, user.password);
-    if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
-
-    const token = jwt.sign(
-        {
-            email: user.email,
-            role: user.role,
-            id: user._id
-        },
-        process.env.TOKEN_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES }
-    );
-
-    // Return token in response
-    res.header('auth-token', token).json({
-        error: null,
-        data: { token }
-    });
-});
 
 router.get('/profile', verifyToken, async (req, res) => {
     try {
@@ -358,6 +333,42 @@ router.get('/user/:userId', verifyToken, async (req, res) => {
 });
 
 
+router.post('/login', async (req, res) => {
+    const { error } = loginSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await userModel.findOne({ email: req.body.email });
+    if (!user) return res.status(400).json({ error: 'User not found' });
+
+    const validPassword = await bcrypt.compare(req.body.password, user.password);
+    if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
+
+    const token = jwt.sign(
+        {
+            email: user.email,
+            role: user.role,
+            id: user._id
+        },
+        process.env.TOKEN_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES }
+    );
+
+    // Preparar datos del usuario sin la contraseña
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    // Serializar los datos del usuario
+    const serializedUser = serializeData(userResponse);
+
+    // Devolver token y datos del usuario
+    res.header('auth-token', token).json({
+        error: null,
+        data: {
+            token,
+            user: serializedUser
+        }
+    });
+});
 
 
 module.exports = router

@@ -69,13 +69,11 @@ module.exports = (io) => {
                 console.log(`Usuario ${userId} unido automáticamente al grupo ${group._id}`);
             });
 
-            // Notificar al usuario que está conectado
             socket.emit('connected', {
                 status: 'connected',
                 groups: userGroups.map(group => group._id)
             });
 
-            // Manejar unión a grupo de lectura
             socket.on('join:group', async (data) => {
                 try {
                     const { groupId } = data;
