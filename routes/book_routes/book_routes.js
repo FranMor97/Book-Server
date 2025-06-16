@@ -413,6 +413,7 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+
 router.post('/', verifyToken, async (req, res) => {
     const { error } = bookSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
@@ -529,7 +530,7 @@ router.delete('/comments/:commentId', verifyToken, async (req, res) => {
         }
 
         const bookUser = await BookUserModel.findOne({
-            'reviews.reviewId': new mongoose.Types.ObjectId(commentId)
+            'reviews._id': new mongoose.Types.ObjectId(commentId)
         }).populate('bookId', 'title authors');
 
         if (!bookUser) {
@@ -539,7 +540,7 @@ router.delete('/comments/:commentId', verifyToken, async (req, res) => {
 
         // Encontrar el índice del comentario específico
         const reviewIndex = bookUser.reviews.findIndex(
-            review => review.reviewId.toString() === commentId
+            review => review._id.toString() === commentId
         );
 
         if (reviewIndex === -1) {
