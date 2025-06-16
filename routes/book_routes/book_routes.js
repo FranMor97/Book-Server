@@ -502,7 +502,6 @@ router.get('/books/:bookId/reviews', async (req, res) => {
                 }
             });
         });
-
         // Ordenar por fecha (más recientes primero)
         reviews.sort((a, b) => b.date - a.date);
 
@@ -517,6 +516,61 @@ router.get('/books/:bookId/reviews', async (req, res) => {
     }
 });
 
+
+router.delete('/comments/:commentId', verifyToken, async (req, res) => {
+    try {
+        const { commentId } = req.params;
+        const userId = req.user.id;
+
+        // Validar que commentId sea un ObjectId válido
+        if (!mongoose.Types.ObjectId.isValid(commentId)) {
+            return res.status(400).json({ error: 'ID de comentario inválido' });
+        }
+
+        // Buscar la relación libro-usuario que contiene el comentario
+        const bookUser = await BookUserModel.findOne({
+            'reviews.reviewId': new mongoose.Types.ObjectId(commentId)
+        });
+
+        if (!bookUser) {
+            return res.status(404).json({ error: 'Comentario no encontrado' });
+        }
+
+        // Verificar si el usuario es el propietario del comentario o un administrador
+        if (bookUser.userId.toString() !== userId && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario' });
+        }
+
+        // Encontrar y eliminar el comentario específico
+        const reviewIndex = bookUser.reviews.findIndex(
+            review => review.reviewId.toString() === commentId
+        );
+
+        if (reviewIndex === -1) {
+            return res.status(404).json({ error: 'Comentario no encontrado' });
+        }
+
+        // Guardar información del comentario para actualizar las estadísticas del libro
+        const deletedReview = bookUser.reviews[reviewIndex];
+        const bookId = bookUser.bookId;
+
+        // Eliminar el comentario del array
+        bookUser.reviews.splice(reviewIndex, 1);
+        await bookUser.save();
+
+        // Actualizar el rating promedio del libro si el comentario era público
+        if (deletedReview.isPublic) {
+            await updateBookRating(bookId);
+        }
+
+        res.status(200).json({
+            message: 'Comentario eliminado correctamente'
+        });
+    } catch (error) {
+        console.error('Error al eliminar comentario:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 router.delete('/:id', verifyToken, async (req, res) => {
     try {

@@ -10,6 +10,12 @@ const userModel = require('../../models/user')
 const verifyToken = require('../../utils/validate_token.js')
 const mongoose = require("mongoose");
 
+const BookUserModel = require('../../models/book_user');
+const BookCommentModel = require('../../models/book_comment');
+const FriendshipModel = require('../../models/friendship');
+const ReadingGroupModel = require('../../models/reading_group');
+const GroupMessageModel = require('../../models/group_message');
+
 // Función para serializar los datos de MongoDB
 const serializeData = (data) => {
     return JSON.parse(JSON.stringify(data));
@@ -168,13 +174,16 @@ router.get('/profile:userId', verifyToken, async (req, res) => {
 
 
 // Update user profile endpoint
-router.patch('/profile', verifyToken, async (req, res) => {
+router.patch('/profile', async (req, res) => {
     try {
-        // Exclude sensitive fields from updates
-        const { password, role, email, idNumber, ...updateData } = req.body;
 
+        const { password, role, email, idNumber, ...updateData } = req.body;
+        const id = req.body._id;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'ID de usuario inválido' });
+        }
         // Find user by ID (from token)
-        const user = await userModel.findById(req.user.id);
+        const user = await userModel.findById(id);
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
