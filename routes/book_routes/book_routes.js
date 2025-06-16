@@ -530,7 +530,7 @@ router.delete('/comments/:commentId', verifyToken, async (req, res) => {
         }
 
         const bookUser = await BookUserModel.findOne({
-            'reviews._id': new mongoose.Types.ObjectId(commentId)
+            'reviews.reviewId': new mongoose.Types.ObjectId(commentId)
         }).populate('bookId', 'title authors');
 
         if (!bookUser) {
@@ -540,7 +540,7 @@ router.delete('/comments/:commentId', verifyToken, async (req, res) => {
 
         // Encontrar el índice del comentario específico
         const reviewIndex = bookUser.reviews.findIndex(
-            review => review._id.toString() === commentId
+            review => review.reviewId.toString() === commentId
         );
 
         if (reviewIndex === -1) {

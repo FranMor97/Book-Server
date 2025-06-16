@@ -206,17 +206,12 @@
             // Para libros completados en el período
             bookUsers.forEach(bookUser => {
                 if (bookUser.status === 'completed' && bookUser.finishDate >= startDate) {
-                    // Si se completó en el período, contar todas las páginas
                     pagesRead += bookUser.currentPage;
                 } else if (bookUser.status === 'reading') {
-                    // Para libros en progreso, idealmente deberíamos tener un historial
-                    // Por ahora, estimamos basándonos en la fecha de inicio
                     if (bookUser.startDate && bookUser.startDate >= startDate) {
                         // Si empezó en el período, contar todas las páginas leídas
                         pagesRead += bookUser.currentPage;
                     } else {
-                        // Si empezó antes, estimar progreso proporcional
-                        // Esta es una aproximación
                         const daysInPeriod = Math.floor((new Date() - startDate) / (1000 * 60 * 60 * 24));
                         const totalDays = bookUser.startDate
                             ? Math.floor((new Date() - bookUser.startDate) / (1000 * 60 * 60 * 24))

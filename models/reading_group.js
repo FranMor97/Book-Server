@@ -132,7 +132,7 @@ ReadingGroupSchema.methods.toFlutterJSON = function() {
                 lastName1: member.userId.lastName1,
                 lastName2: member.userId.lastName2,
                 email: member.userId.email,
-                avatar: member.userId.avatar
+                avatar: member.userId.avatar == null ? '' :member.userId.avatar,
                 // Añadir otros campos del usuario según necesidad
             } : null
         }))
