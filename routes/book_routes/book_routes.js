@@ -522,55 +522,72 @@ router.delete('/comments/:commentId', verifyToken, async (req, res) => {
         const { commentId } = req.params;
         const userId = req.user.id;
 
-        // Validar que commentId sea un ObjectId válido
+        console.log(`📤 SOLICITUD PARA ELIMINAR COMENTARIO: ${commentId} por usuario: ${userId}`);
+
         if (!mongoose.Types.ObjectId.isValid(commentId)) {
             return res.status(400).json({ error: 'ID de comentario inválido' });
         }
 
-        // Buscar la relación libro-usuario que contiene el comentario
         const bookUser = await BookUserModel.findOne({
             'reviews.reviewId': new mongoose.Types.ObjectId(commentId)
-        });
+        }).populate('bookId', 'title authors');
 
         if (!bookUser) {
+            console.log('❌ COMENTARIO NO ENCONTRADO');
             return res.status(404).json({ error: 'Comentario no encontrado' });
         }
 
-        // Verificar si el usuario es el propietario del comentario o un administrador
-        if (bookUser.userId.toString() !== userId && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario' });
-        }
-
-        // Encontrar y eliminar el comentario específico
+        // Encontrar el índice del comentario específico
         const reviewIndex = bookUser.reviews.findIndex(
             review => review.reviewId.toString() === commentId
         );
 
         if (reviewIndex === -1) {
+            console.log('❌ COMENTARIO NO ENCONTRADO EN EL ARRAY');
             return res.status(404).json({ error: 'Comentario no encontrado' });
         }
 
-        // Guardar información del comentario para actualizar las estadísticas del libro
-        const deletedReview = bookUser.reviews[reviewIndex];
-        const bookId = bookUser.bookId;
+        const review = bookUser.reviews[reviewIndex];
+
+        if (bookUser.userId.toString() !== userId && req.user.role !== 'admin') {
+            console.log('❌ PERMISOS INSUFICIENTES');
+            return res.status(403).json({
+                error: 'No tienes permiso para eliminar este comentario'
+            });
+        }
+
+        const bookId = bookUser.bookId._id;
+        const wasPublic = review.isPublic;
+        const rating = review.rating;
+
+        console.log(`📋 ELIMINANDO COMENTARIO: Rating: ${rating}, Público: ${wasPublic}`);
 
         // Eliminar el comentario del array
         bookUser.reviews.splice(reviewIndex, 1);
         await bookUser.save();
 
         // Actualizar el rating promedio del libro si el comentario era público
-        if (deletedReview.isPublic) {
+        if (wasPublic && rating > 0) {
             await updateBookRating(bookId);
         }
 
+        console.log('✅ COMENTARIO ELIMINADO EXITOSAMENTE');
+
         res.status(200).json({
-            message: 'Comentario eliminado correctamente'
+            message: 'Comentario eliminado correctamente',
+            data: {
+                commentId,
+                bookTitle: bookUser.bookId.title,
+                bookAuthors: bookUser.bookId.authors
+            }
         });
+
     } catch (error) {
-        console.error('Error al eliminar comentario:', error);
+        console.error('❌ ERROR AL ELIMINAR COMENTARIO:', error);
         res.status(500).json({ error: error.message });
     }
 });
+
 
 router.delete('/:id', verifyToken, async (req, res) => {
     try {
