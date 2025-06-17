@@ -125,11 +125,10 @@ router.get('/:groupId', verifyToken, async (req, res) => {
     }
 });
 
-// POST crear un nuevo grupo
 router.post('/', verifyToken, async (req, res) => {
     try {
         const creatorId = req.user.id;
-        const { name, description, bookId, isPrivate, readingGoal } = req.body;
+        const { name, description, bookId, isPrivate, readingGoal, memberIds } = req.body;
 
         // Verificar que el libro exista
         const bookExists = await BookModel.findById(bookId);
@@ -137,7 +136,39 @@ router.post('/', verifyToken, async (req, res) => {
             return res.status(404).json({ error: 'Libro no encontrado' });
         }
 
-        // Crear nuevo grupo
+        // Preparar la lista de miembros inicial
+        const initialMembers = [{
+            userId: creatorId,
+            role: 'admin',
+            currentPage: 0,
+            joinedAt: new Date()
+        }];
+
+        // Si se proporcionaron memberIds, añadirlos como miembros
+        if (memberIds && Array.isArray(memberIds)) {
+            // Verificar que los usuarios existan
+            const validUserIds = [];
+            for (const memberId of memberIds) {
+                if (mongoose.Types.ObjectId.isValid(memberId)) {
+                    const userExists = await UserModel.findById(memberId);
+                    if (userExists && memberId !== creatorId) { // No añadir al creador dos veces
+                        validUserIds.push(memberId);
+                    }
+                }
+            }
+
+            // Añadir los usuarios válidos como miembros
+            validUserIds.forEach(userId => {
+                initialMembers.push({
+                    userId: userId,
+                    role: 'member',
+                    currentPage: 0,
+                    joinedAt: new Date()
+                });
+            });
+        }
+
+        // Crear nuevo grupo con los miembros
         const newGroup = new ReadingGroupModel({
             name,
             description,
@@ -145,11 +176,7 @@ router.post('/', verifyToken, async (req, res) => {
             creatorId,
             isPrivate: isPrivate || false,
             readingGoal,
-            members: [{
-                userId: creatorId,
-                role: 'admin',
-                currentPage: 0
-            }]
+            members: initialMembers
         });
 
         await newGroup.save();
@@ -163,6 +190,18 @@ router.post('/', verifyToken, async (req, res) => {
         });
 
         await systemMessage.save();
+
+        // Si se añadieron miembros adicionales, crear mensajes de sistema
+        if (initialMembers.length > 1) {
+            const creator = await UserModel.findById(creatorId, 'firstName lastName1');
+            const addedMembersMessage = new GroupMessageModel({
+                groupId: newGroup._id,
+                userId: creatorId,
+                text: `${creator.firstName} ${creator.lastName1} añadió ${initialMembers.length - 1} miembro(s) al grupo`,
+                type: 'system'
+            });
+            await addedMembersMessage.save();
+        }
 
         // Obtener el grupo recién creado CON DATOS POBLADOS
         const populatedGroup = await ReadingGroupModel.findByIdWithPopulatedData(newGroup._id);
